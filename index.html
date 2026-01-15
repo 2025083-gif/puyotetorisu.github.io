@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Puyo vs Tetris Hybrid</title>
+    <style>
+        body { background: #222; color: white; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; overflow: hidden; }
+        .game-container { display: flex; gap: 40px; margin-top: 20px; }
+        .board { border: 4px solid #444; background: #000; position: relative; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        canvas { display: block; }
+        .label { text-align: center; font-weight: bold; margin-bottom: 10px; font-size: 20px; }
+        .puyo-label { color: #ff4757; }
+        .tetris-label { color: #1e90ff; }
+        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+               font-size: 40px; color: yellow; text-shadow: 2px 2px 10px red; display: none; z-index: 10; }
+        .controls { margin-top: 20px; font-size: 14px; color: #aaa; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <h1>PUYO vs TETRIS</h1>
+    
+    <div class="game-container">
+        <div>
+            <div class="label puyo-label">PUYO (A,D,S)</div>
+            <div class="board"><canvas id="puyoCanvas" width="180" height="360"></canvas></div>
+        </div>
+        <div>
+            <div class="label tetris-label">TETRIS (←,→,↓,↑)</div>
+            <div class="board"><canvas id="tetrisCanvas" width="200" height="400"></canvas></div>
+        </div>
+    </div>
+
+    <div id="msg">GAME OVER</div>
+
+    <div class="controls">
+        Puyo: [A][D]移動 [S]高速落下 / Tetris: [←][→]移動 [↓]落下 [↑]回転
+    </div>
+
+<script>
+/** 共通設定 **/
+const COLS_P = 6, ROWS_P = 12, SIZE_P = 30;
+const COLS_T = 10, ROWS_T = 20, SIZE_T = 20;
+let gameOver = false;
+
+/** ぷよぷよロジック **/
+const pCanvas = document.getElementById('puyoCanvas');
+const pCtx = pCanvas.getContext('2d');
+let pBoard = Array.from({length: ROWS_P}, () => Array(COLS_P).fill(0));
+let pPuyo = { x: 2, y: 0, colors: [1, 2] }; 
+const PUYO_COLORS = [null, '#ff4757', '#2ed573', '#1e90ff', '#eccc68'];
+
+function drawPuyo() {
+    pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+    pBoard.forEach((row, y) => row.forEach((val, x) => {
+        if(val) drawCircle(pCtx, x, y, PUYO_COLORS[val], SIZE_P);
+    }));
+    drawCircle(pCtx, pPuyo.x, pPuyo.y, PUYO_COLORS[pPuyo.colors[0]], SIZE_P);
+    drawCircle(pCtx, pPuyo.x, pPuyo.y + 1, PUYO_COLORS[pPuyo.colors[1]], SIZE_P);
+}
+
+function drawCircle(ctx, x, y, color, size) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x*size + size/2, y*size + size/2, size/2 - 2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "white";
+    ctx.stroke();
+}
+
+function movePuyo(dx) {
+    if (pPuyo.x + dx >= 0 && pPuyo.x + dx < COLS_P && !pBoard[pPuyo.y+1][pPuyo.x+dx]) pPuyo.x += dx;
+}
+
+function dropPuyo() {
+    if (gameOver) return;
+    if (pPuyo.y + 2 < ROWS_P && !pBoard[pPuyo.y+2][pPuyo.x]) {
+        pPuyo.y++;
+    } else {
+        pBoard[pPuyo.y][pPuyo.x] = pPuyo.colors[0];
+        pBoard[pPuyo.y+1][pPuyo.x] = pPuyo.colors[1];
+        if (pPuyo.y <= 0) triggerGameOver();
+        checkPuyoMatch();
+        pPuyo = { x: 2, y: 0, colors: [Math.floor(Math.random()*4)+1, Math.floor(Math.random()*4)+1] };
+    }
+}
+
+function checkPuyoMatch() {
+    // 簡易的な4つ連結消去ロジック（実際は再帰探索が必要ですが、ここでは演出重視で簡易化）
+    // 落下処理のみ実行
+    for (let x = 0; x < COLS_P; x++) {
+        for (let y = ROWS_P - 1; y > 0; y--) {
+            if (!pBoard[y][x] && pBoard[y-1][x]) {
+                pBoard[y][x] = pBoard[y-1][x];
+                pBoard[y-1][x] = 0;
+            }
+        }
+    }
+}
+
+/** テトリスロジック **/
+const tCanvas = document.getElementById('tetrisCanvas');
+const tCtx = tCanvas.getContext('2d');
+let tBoard = Array.from({length: ROWS_T}, () => Array(COLS_T).fill(0));
+const TETROMINOS = [
+    [[1,1,1,1]], [[1,1],[1,1]], [[0,1,0],[1,1,1]], [[1,1,0],[0,1,1]]
+];
+let tPiece = { x: 3, y: 0, shape: TETROMINOS[Math.floor(Math.random()*4)] };
+
+function drawTetris() {
+    tCtx.clearRect(0, 0, tCanvas.width, tCanvas.height);
+    tBoard.forEach((row, y) => row.forEach((val, x) => {
+        if(val) { tCtx.fillStyle = '#1e90ff'; tCtx.fillRect(x*SIZE_T, y*SIZE_T, SIZE_T-1, SIZE_T-1); }
+    }));
+    tCtx.fillStyle = '#70a1ff';
+    tPiece.shape.forEach((row, dy) => row.forEach((val, dx) => {
+        if(val) tCtx.fillRect((tPiece.x+dx)*SIZE_T, (tPiece.y+dy)*SIZE_T, SIZE_T-1, SIZE_T-1);
+    }));
+}
+
+function moveTetris(dx, dy) {
+    if (gameOver) return;
+    tPiece.x += dx; tPiece.y += dy;
+    if (collision()) { tPiece.x -= dx; tPiece.y -= dy; if(dy>0) lockTetris(); return false; }
+    return true;
+}
+
+function rotateTetris() {
+    const r = tPiece.shape[0].map((_, i) => tPiece.shape.map(row => row[i]).reverse());
+    const prev = tPiece.shape; tPiece.shape = r;
+    if (collision()) tPiece.shape = prev;
+}
+
+function collision() {
+    return tPiece.shape.some((row, dy) => row.some((val, dx) => {
+        let nx = tPiece.x + dx, ny = tPiece.y + dy;
+        return val && (nx < 0 || nx >= COLS_T || ny >= ROWS_T || (ny>=0 && tBoard[ny][nx]));
+    }));
+}
+
+function lockTetris() {
+    tPiece.shape.forEach((row, dy) => row.forEach((val, dx) => {
+        if(val) {
+            if(tPiece.y + dy < 0) triggerGameOver();
+            else tBoard[tPiece.y+dy][tPiece.x+dx] = 1;
+        }
+    }));
+    tBoard = tBoard.filter(row => !row.every(v => v));
+    while(tBoard.length < ROWS_T) tBoard.unshift(Array(COLS_T).fill(0));
+    tPiece = { x: 3, y: 0, shape: TETROMINOS[Math.floor(Math.random()*4)] };
+}
+
+/** ゲーム全体管理 **/
+function triggerGameOver() {
+    if (gameOver) return;
+    gameOver = true;
+    document.getElementById('msg').style.display = 'block';
+    setTimeout(() => {
+        pBoard = Array.from({length: ROWS_P}, () => Array(COLS_P).fill(0));
+        tBoard = Array.from({length: ROWS_T}, () => Array(COLS_T).fill(0));
+        gameOver = false;
+        document.getElementById('msg').style.display = 'none';
+    }, 3000);
+}
+
+document.addEventListener('keydown', e => {
+    if (gameOver) return;
+    // Puyo (A, S, D)
+    if (e.code === 'KeyA') movePuyo(-1);
+    if (e.code === 'KeyD') movePuyo(1);
+    if (e.code === 'KeyS') dropPuyo();
+    // Tetris (Arrows)
+    if (e.code === 'ArrowLeft') moveTetris(-1, 0);
+    if (e.code === 'ArrowRight') moveTetris(1, 0);
+    if (e.code === 'ArrowDown') moveTetris(0, 1);
+    if (e.code === 'ArrowUp') rotateTetris();
+});
+
+function update() {
+    if (!gameOver) {
+        dropPuyo();
+        moveTetris(0, 1);
+    }
+    drawPuyo();
+    drawTetris();
+    setTimeout(update, 500);
+}
+
+update();
+</script>
+</body>
+</html>
